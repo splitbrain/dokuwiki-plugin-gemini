@@ -1,5 +1,6 @@
 <?php
 
+use splitbrain\phpcli\Colors;
 use splitbrain\phpcli\Options;
 
 /**
@@ -14,30 +15,47 @@ class cli_plugin_gemini extends \dokuwiki\Extension\CLIPlugin
     /** @inheritDoc */
     protected function setup(Options $options)
     {
-        $options->setHelp('FIXME: What does this CLI do?');
-
-        // main arguments
-        //$options->registerArgument('FIXME:argumentName', 'FIXME:argument description', 'FIXME:required? true|false');
+        $options->setHelp('Starts a Gemini Protocol server and serves the wiki as GemText');
 
         // options
-        // $options->registerOption('FIXME:longOptionName', 'FIXME: helptext for option', 'FIXME: optional shortkey', 'FIXME:needs argument? true|false', 'FIXME:if applies only to subcommand: subcommandName');
+        $options->registerOption(
+            'interface',
+            'The IP to listen on. Defaults to ' . $this->colors->wrap('0.0.0.0', Colors::C_CYAN),
+            'i',
+            'ip'
+        );
+        $options->registerOption(
+            'port',
+            'The port to listen on. Defaults to ' . $this->colors->wrap('1965', Colors::C_CYAN),
+            'p',
+            'port'
+        );
+        $options->registerOption(
+            'hostname',
+            'The hostname this server shall use. Defaults to ' . $this->colors->wrap('localhost', Colors::C_CYAN),
+            's',
+            'host'
+        );
+        $options->registerOption(
+            'certfile',
+            'Path to a PEM formatted TLS certificate to use. The common name should match the hostname. ' .
+            'If none is given a self-signed one is auto-generated.',
+            'c',
+            'cert'
+        );
 
-        // sub-commands and their arguments
-        // $options->registerCommand('FIXME:subcommandName', 'FIXME:subcommand description');
-        // $options->registerArgument('FIXME:subcommandArgumentName', 'FIXME:subcommand-argument description', 'FIXME:required? true|false', 'FIXME:subcommandName');
     }
 
     /** @inheritDoc */
     protected function main(Options $options)
     {
-        // $command = $options->getCmd()
-        // $arguments = $options->getArgs()
-
-        $pemfile = $this->getSelfSignedCertificate('localhost');
-        $this->info('Using certificate in {pemfile}', compact('pemfile'));
-
-        $this->serve('0.0.0.0', 1965, $pemfile);
-
+        $interface = $options->getOpt('interface', '0.0.0.0');
+        $port = $options->getOpt('port', '1965');
+        $host = $options->getOpt('host', 'localhost');
+        $pemfile = $options->getOpt('certfile');
+        if (!$pemfile) $pemfile = $this->getSelfSignedCertificate($host);
+        $this->notice('Using certificate in {pemfile}', compact('pemfile'));
+        $this->serve($interface, $port, $pemfile);
     }
 
     /**
@@ -59,9 +77,9 @@ class cli_plugin_gemini extends \dokuwiki\Extension\CLIPlugin
         );
 
         if (function_exists('pcntl_fork')) {
-            $this->info('Multithreading enabled.');
+            $this->notice('Multithreading enabled.');
         } else {
-            $this->info('Multithreading disabled (PCNTL extension not present)');
+            $this->notice('Multithreading disabled (PCNTL extension not present)');
         }
 
         $errno = 0;
@@ -119,7 +137,7 @@ class cli_plugin_gemini extends \dokuwiki\Extension\CLIPlugin
         $tlsSuccess = stream_socket_enable_crypto($conn, true, STREAM_CRYPTO_METHOD_TLS_SERVER);
         if ($tlsSuccess !== true) {
             fclose($conn);
-            $this->error('TLS failed for connection from {peername}', compact('peername'));
+            $this->warning('TLS failed for connection from {peername}', compact('peername'));
 
             // forked child or single thread?
             if ($pid === 0) exit;
@@ -181,11 +199,56 @@ class cli_plugin_gemini extends \dokuwiki\Extension\CLIPlugin
      */
     protected function generateResponse($path)
     {
+        if (substr($path, 0, 8) == '/_media/') {
+            $isMedia = true;
+            $path = substr($path, 8);
+        } else {
+            $isMedia = false;
+        }
+        $id = cleanID(str_replace('/', ':', $path));
+
+        if ($isMedia) {
+            return $this->generateMediaResponse($id);
+        } else {
+            return $this->generatePageResponse($id);
+        }
+    }
+
+    /**
+     * Serve the given media ID raw
+     *
+     * @param string $id
+     * @return array|false
+     * @todo Streaming the data would be better
+     *
+     */
+    protected function generateMediaResponse($id)
+    {
+        if (!media_exists($id)) return false;
+        $file = mediaFN($id);
+        list($ext, $mime, $dl) = mimetype($file);
+
+        return [
+            'mime' => $mime,
+            'body' => file_get_contents($file),
+        ];
+    }
+
+    /**
+     * Serve the given page ID as gemtext
+     *
+     * @param string $id
+     * @return array|false
+     */
+    protected function generatePageResponse($id)
+    {
+        if (!page_exists($id)) return false;
+
         global $ID;
         global $INFO;
 
         // FIXME we probably need to provide more standard environment here
-        $ID = str_replace('/', ':', $path);
+        $ID = $id;
         $INFO = pageinfo();
         $file = wikiFN($ID);
 
