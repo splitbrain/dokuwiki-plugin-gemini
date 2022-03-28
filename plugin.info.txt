@@ -1,0 +1,7 @@
+base   gemini
+author Andreas Gohr
+email  andi@splitbrain.org
+date   2022-03-28
+name   gemini plugin
+desc   Expose your wiki as a read-only gemini server
+url    https://www.dokuwiki.org/plugin:gemini
