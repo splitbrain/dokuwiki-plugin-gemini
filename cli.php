@@ -76,6 +76,14 @@ class cli_plugin_gemini extends \dokuwiki\Extension\CLIPlugin
         if ($socket === false) throw new \splitbrain\phpcli\Exception($errstr, $errno);
         $this->success('Listening on {interface}:{port}', compact('interface', 'port'));
 
+        // basic environment
+        global $_SERVER;
+        $_SERVER['SERVER_ADDR'] = $interface;
+        $_SERVER['SERVER_PORT'] = $port;
+        $_SERVER['SERVER_PROTOCOL'] = 'gemini';
+        $_SERVER['REQUEST_SCHEME'] = 'gemini';
+        $_SERVER['HTTPS'] = 'on';
+
         while (true) {
             $peername = '';
             $conn = stream_socket_accept($socket, -1, $peername);
@@ -139,6 +147,14 @@ class cli_plugin_gemini extends \dokuwiki\Extension\CLIPlugin
             $response = "59 BAD URL\r\n";
         }
 
+        // environment
+        global $_SERVER;
+        $_SERVER['HTTP_HOST'] = $url_elems['host'];
+        $_SERVER['SERVER_NAME'] = $url_elems['host'];
+        $_SERVER['REMOTE_ADDR'] = explode(':', $peername)[0];
+        $_SERVER['REMOTE_PORT'] = explode(':', $peername)[1];
+        $_SERVER['REQUEST_URI'] = $url_elems['path'];
+
         $answer = $this->generateResponse($url_elems['path']);
         if ($answer) {
             $response = "20 " . $answer['mime'] . "\r\n";
@@ -165,9 +181,17 @@ class cli_plugin_gemini extends \dokuwiki\Extension\CLIPlugin
      */
     protected function generateResponse($path)
     {
+        global $ID;
+        global $INFO;
+
+        // FIXME we probably need to provide more standard environment here
+        $ID = str_replace('/', ':', $path);
+        $INFO = pageinfo();
+        $file = wikiFN($ID);
+
         return [
             'mime' => 'text/gemini; lang=en',
-            'body' => 'hello world '.$path,
+            'body' => p_cached_output($file, 'gemini', $ID),
         ];
     }
 
@@ -181,7 +205,7 @@ class cli_plugin_gemini extends \dokuwiki\Extension\CLIPlugin
     {
 
         $pemfile = getCacheName($domain, '.pem');
-        if (time() - filemtime($pemfile) > 3620) {
+        if (time() - filemtime($pemfile) > 3620 * 60 * 60 * 24) {
             $this->info('Generating new certificate for {domain}', compact('domain'));
             $pem = $this->createCert($domain);
             file_put_contents($pemfile, $pem);
