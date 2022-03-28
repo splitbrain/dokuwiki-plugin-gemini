@@ -206,6 +206,7 @@ class cli_plugin_gemini extends \dokuwiki\Extension\CLIPlugin
             $isMedia = false;
         }
         $id = cleanID(str_replace('/', ':', $path));
+        if(auth_quickaclcheck($id) < AUTH_READ) return false;
 
         if ($isMedia) {
             return $this->generateMediaResponse($id);
